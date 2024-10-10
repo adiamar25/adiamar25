@@ -1,0 +1,103 @@
+// This file is part of www.nand2tetris.org
+// and the book "The Elements of Computing Systems"
+// by Nisan and Schocken, MIT Press.
+// File name: projects/05/CPU.hdl
+
+/**
+ * The Hack CPU (Central Processing unit), consisting of an ALU,
+ * two registers named A and D, and a program counter named PC.
+ * The CPU is designed to fetch and execute instructions written in 
+ * the Hack machine language. In particular, functions as follows:
+ * Executes the inputted instruction according to the Hack machine 
+ * language specification. The D and A in the language specification
+ * refer to CPU-resident registers, while M refers to the external
+ * memory location addressed by A, i.e. to Memory[A]. The inM input 
+ * holds the value of this location. If the current instruction needs 
+ * to write a value to M, the value is placed in outM, the address 
+ * of the target location is placed in the addressM output, and the 
+ * writeM control bit is asserted. (When writeM==0, any value may 
+ * appear in outM). The outM and writeM outputs are combinational: 
+ * they are affected instantaneously by the execution of the current 
+ * instruction. The addressM and pc outputs are clocked: although they 
+ * are affected by the execution of the current instruction, they commit 
+ * to their new values only in the next time step. If reset==1 then the 
+ * CPU jumps to address 0 (i.e. pc is set to 0 in next time step) rather 
+ * than to the address resulting from executing the current instruction. 
+ */
+
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+
+    PARTS:
+    Not(in=instruction[15], out=notOP); // instruction[15] represent 
+                                        // the OP-code. 
+                                        // A-instruction if OP-code==1, 
+                                        // C-instruction if OP-code==0. 
+    Mux16(a=ALUout, b=instruction, sel=notOP, out=mux1out); 
+    // if it's A-instruction, then A-register's input 
+    // is the last 15 bits of instruction. 
+    // else, A-register's input is ALUout.
+    Or(a=instruction[5], b=notOP, out=Aloadbit); 
+    // if it's A-instruction, we want to put the instruction value 
+    // into the A-register.
+    // in this case notOP==1. hence, the Or gate always outputs 1, 
+    // and thanks to the mux
+    // we get the wanted outcome.
+    // if it's C-instruction, then we want to input the ALUout into 
+    // A-register, but only
+    // if the relevant destination-bit, instruction[5], is 1. 
+    // so in this case notOP==0,
+    // and therefore the Or gate outputs 1 if instruction[5]==1, 
+    // else it's outputs 0.
+    // we input this output, Aloadbit, into the ARegister load bit, 
+    // and get the wanted outcome. 
+    ARegister(in=mux1out, load=Aloadbit, out=Aout, out[0..14]=addressM); 
+    // the first 14 bits of Aout goes to adressM
+    And(a=instruction[15], b=instruction[12], out=amSwitch);
+    Mux16(a=Aout, b=inM, sel=amSwitch, out=mux2out); 
+    // mux with the appropriate sel bit, instruction[12].
+    And(a=instruction[15], b=instruction[4], out=Dloadbit);    
+    // we feed the D-register only if it's C-instruction *and* if 
+    // the relevant load bit, instruction[4]==1
+    DRegister(in=ALUout, load=Dloadbit, out=Dout);
+    ALU(x=Dout, y=mux2out, 
+        zx=instruction[11], 
+        nx=instruction[10], 
+        zy=instruction[9], 
+        ny=instruction[8], 
+        f=instruction[7], 
+        no=instruction[6], 
+        out=ALUout, out=outM, 
+        zr=zrout, ng=ngout); 
+        // instruction[6..11] are the relevant bits 
+        // from the C-instruction to the ALU's input.
+    
+    And(a=instruction[15], b=instruction[3], out=writeM); 
+    // instruction[3] is the relevant load bit of writeM,
+    // so if instruction[3]==1 *and* instruction[15]==1 (which means
+    // it's C-instruction), then writeM==1.
+    
+    Or(a=zrout, b=ngout, out=notpositive);
+    Not(in=notpositive, out=positive);
+    And(a=ngout, b=instruction[2], out=jlt);
+    And(a=zrout, b=instruction[1], out=jeq);
+    And(a=positive, b=instruction[0], out=jgt);
+    Or(a=jeq, b=jlt, out=jle);
+    Or(a=jgt, b=jle, out=jumptoA);
+    And(a=instruction[15], b=jumptoA, out=g);
+    PC(in=Aout, load=g, inc=true, reset=reset, out[0..14]=pc);
+
+
+    
+
+}
